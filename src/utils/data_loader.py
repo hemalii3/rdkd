@@ -157,6 +157,30 @@ def validate_data(data: pd.DataFrame, year: int = 2023) -> dict:
     return results
 
 
+def load_sample_data(year: int = 23) -> pd.DataFrame:
+    """Load sample data for a specific year (convenience wrapper).
+    
+    Args:
+        year: Year suffix (23 for 2023, 24 for 2024).
+    
+    Returns:
+        DataFrame with household data.
+    
+    Raises:
+        ValueError: If year is not 23 or 24.
+    
+    Example:
+        >>> data_23 = load_sample_data(year=23)
+        >>> data_24 = load_sample_data(year=24)
+    """
+    if year == 23:
+        return load_train_data()
+    elif year == 24:
+        return load_test_data()
+    else:
+        raise ValueError(f"Year must be 23 or 24, got {year}")
+
+
 def get_household_series(data: pd.DataFrame, household_id: int) -> pd.Series:
     """Extract time series for a specific household.
     
