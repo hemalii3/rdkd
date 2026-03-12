@@ -188,9 +188,9 @@ class FeatureEngineer:
         """
         features = pd.DataFrame(index=data.index)
         
-        # Rolling window standard deviation
-        features['rolling_std_7'] = data.rolling(window=7, axis=1).std().mean(axis=1)
-        features['rolling_std_30'] = data.rolling(window=30, axis=1).std().mean(axis=1)
+        # Rolling window standard deviation (transpose to apply rolling along rows)
+        features['rolling_std_7'] = data.T.rolling(window=7).std().T.mean(axis=1)
+        features['rolling_std_30'] = data.T.rolling(window=30).std().T.mean(axis=1)
         
         # Number of peaks and valleys
         features['num_peaks'] = data.apply(
