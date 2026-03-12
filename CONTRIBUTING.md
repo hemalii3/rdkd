@@ -15,34 +15,36 @@ This project follows **PEP8** conventions with some specific guidelines:
    - Private methods: `_leading_underscore`
 
 3. **Imports:**
+
    ```python
    # Standard library
    import os
    import sys
-   
+
    # Third-party
    import numpy as np
    import pandas as pd
-   
+
    # Local imports
    from src.utils import data_loader
    ```
 
 4. **Docstrings:** Use Google style
+
    ```python
    def compute_mae(predictions, actuals):
        """Compute Mean Absolute Error.
-       
+
        Args:
            predictions (np.ndarray): Predicted values, shape (n_samples,)
            actuals (np.ndarray): Actual values, shape (n_samples,)
-       
+
        Returns:
            float: Mean absolute error
-       
+
        Raises:
            ValueError: If input shapes don't match
-       
+
        Example:
            >>> preds = np.array([1, 2, 3])
            >>> acts = np.array([1.1, 2.2, 2.9])
@@ -92,11 +94,13 @@ flake8 src/ --max-line-length=88
 ## Git Workflow
 
 ### Branch Naming
+
 - Feature: `feature/clustering-kmeans`
 - Bugfix: `fix/missing-values-handling`
 - Documentation: `docs/update-readme`
 
 ### Commit Messages
+
 Follow conventional commits:
 
 ```
@@ -108,6 +112,7 @@ Follow conventional commits:
 ```
 
 **Types:**
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation only
@@ -117,6 +122,7 @@ Follow conventional commits:
 - `chore`: Maintenance tasks
 
 **Example:**
+
 ```
 feat: Add K-Means clustering implementation
 
@@ -128,6 +134,7 @@ Closes #12
 ```
 
 ### Pull Request Process
+
 1. Create feature branch from `main`
 2. Make changes and commit
 3. Push to remote
@@ -140,6 +147,7 @@ Closes #12
 ## Testing
 
 ### Unit Tests
+
 Place tests in `tests/` directory:
 
 ```python
@@ -155,6 +163,7 @@ def test_handle_missing_values():
 ```
 
 Run tests:
+
 ```bash
 pytest tests/
 ```
@@ -164,6 +173,7 @@ pytest tests/
 ## File Organization
 
 ### Source Code Structure
+
 ```
 src/
 ├── __init__.py
@@ -193,6 +203,7 @@ src/
 ```
 
 ### Notebooks Organization
+
 ```
 notebooks/
 ├── 01_EDA.ipynb                    # Exploratory analysis
@@ -264,11 +275,12 @@ def load_csv_data(filepath):
    - Use appropriate data types (int16 vs int64)
 
 2. **Parallel Processing:**
+
    ```python
    from joblib import Parallel, delayed
-   
+
    results = Parallel(n_jobs=-1)(
-       delayed(process_household)(hh_id) 
+       delayed(process_household)(hh_id)
        for hh_id in household_ids
    )
    ```
@@ -282,12 +294,15 @@ def load_csv_data(filepath):
 ## Documentation
 
 ### README Updates
+
 Update README when:
+
 - Adding new dependencies
 - Changing project structure
 - Adding new features
 
 ### Inline Documentation
+
 - Document complex algorithms
 - Add references to papers/sources
 - Explain non-obvious design choices
@@ -297,6 +312,7 @@ Update README when:
 ## Before Committing
 
 **Checklist:**
+
 - [ ] Code follows PEP8 style
 - [ ] Functions have docstrings
 - [ ] No hardcoded paths (use relative paths)

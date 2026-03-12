@@ -8,11 +8,13 @@
 This project explores clustering as a strategic preprocessing step for large-scale time series forecasting. We analyze daily energy consumption data from 17,548 households to improve forecasting accuracy by grouping similar consumption patterns.
 
 ### Dataset
+
 - **Training:** 365 days (2023) - 17,548 households
-- **Testing:** 366 days (2024) - 17,548 households  
+- **Testing:** 366 days (2024) - 17,548 households
 - **Total Observations:** ~6.4 million data points per year
 
 ### Objectives
+
 1. **Clustering:** Group households with similar consumption patterns
 2. **Forecasting:** Predict 366-day ahead consumption (cluster-based vs global model)
 3. **Evaluation:** Compare approaches using household-level Mean Absolute Error (MAE)
@@ -105,18 +107,21 @@ results = evaluate_forecasts(
 ## 🛠️ Development Guidelines
 
 ### Code Style
+
 - Follow **PEP8** conventions
 - Use descriptive variable names
 - Add docstrings to all functions (Google style)
 - Maximum line length: 88 characters (Black formatter)
 
 ### Git Workflow
+
 1. Create feature branch: `git checkout -b feature/your-feature`
 2. Make changes and commit: `git commit -m "descriptive message"`
 3. Push to remote: `git push origin feature/your-feature`
 4. Create pull request for review
 
 ### Testing
+
 ```bash
 # Run unit tests
 python -m pytest tests/
@@ -131,23 +136,27 @@ black --check src/
 ## 📚 Key Components
 
 ### 1. Data Preprocessing
+
 - Missing value handling
 - Outlier detection and treatment
 - Feature extraction (statistical, temporal, seasonal)
 - Data normalization
 
 ### 2. Clustering
+
 - Algorithm comparison (K-Means, Hierarchical, DBSCAN, GMM)
 - Optimal K estimation (Elbow, Silhouette, Davies-Bouldin)
 - Cluster interpretation and visualization
 
 ### 3. Forecasting
+
 - Statistical models (ARIMA, SARIMA, ETS)
 - Machine Learning (Random Forest, XGBoost, LightGBM)
 - Deep Learning (LSTM, GRU) - optional
 - Time series specific (Prophet, N-BEATS)
 
 ### 4. Evaluation
+
 - Primary metric: Mean Absolute Error (MAE)
 - Additional metrics: RMSE, MAPE, R²
 - Household-level and cluster-level analysis
@@ -166,22 +175,22 @@ black --check src/
 
 ## 📅 Timeline
 
-| Week | Dates | Milestone |
-|------|-------|-----------|
-| 1 | Mar 12-18 | EDA Complete |
-| 2 | Mar 19-25 | Feature Engineering |
-| 3 | Mar 26-Apr 1 | Clustering |
-| 4 | Apr 2-8 | Forecasting |
-| 5 | Apr 9-15 | Evaluation |
-| 6 | Apr 16-22 | Report Writing |
-| 7 | Apr 23-29 | Final Polish |
-| **Deadline** | **Apr 30 23:59** | **Submission** |
+| Week         | Dates            | Milestone           |
+| ------------ | ---------------- | ------------------- |
+| 1            | Mar 12-18        | EDA Complete        |
+| 2            | Mar 19-25        | Feature Engineering |
+| 3            | Mar 26-Apr 1     | Clustering          |
+| 4            | Apr 2-8          | Forecasting         |
+| 5            | Apr 9-15         | Evaluation          |
+| 6            | Apr 16-22        | Report Writing      |
+| 7            | Apr 23-29        | Final Polish        |
+| **Deadline** | **Apr 30 23:59** | **Submission**      |
 
 ---
 
 ## 📖 References
 
-- Hyndman, R.J., & Athanasopoulos, G. (2021). *Forecasting: Principles and Practice*
+- Hyndman, R.J., & Athanasopoulos, G. (2021). _Forecasting: Principles and Practice_
 - Aghabozorgi, S., et al. (2015). "Time-series clustering – A decade review"
 - Scikit-learn Documentation: https://scikit-learn.org/
 - TSlearn Documentation: https://tslearn.readthedocs.io/
