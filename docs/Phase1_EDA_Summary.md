@@ -14,6 +14,7 @@ This phase implemented a comprehensive exploratory data analysis (EDA) of the ho
 ## 📁 Deliverables
 
 ### 1. EDA Notebook
+
 - **File:** [`notebooks/01_EDA.ipynb`](../notebooks/01_EDA.ipynb)
 - **Description:** Complete Jupyter notebook with all EDA analyses
 - **Contents:**
@@ -24,6 +25,7 @@ This phase implemented a comprehensive exploratory data analysis (EDA) of the ho
   - Comprehensive visualizations
 
 ### 2. EDA Analysis Module
+
 - **File:** [`src/preprocessing/eda_analysis.py`](../src/preprocessing/eda_analysis.py)
 - **Description:** Reusable Python functions for EDA
 - **Functions:**
@@ -41,6 +43,7 @@ This phase implemented a comprehensive exploratory data analysis (EDA) of the ho
 ## 📊 Key Findings
 
 ### Data Quality
+
 - ✅ **No missing values** (0 NaN)
 - ⚠️ **~168,566 zero consumption days** in 2023 (~2.6% of all data)
 - ⚠️ **~183,137 zero consumption days** in 2024
@@ -48,6 +51,7 @@ This phase implemented a comprehensive exploratory data analysis (EDA) of the ho
 - ✅ All household IDs match perfectly between 2023 and 2024
 
 ### Consumption Statistics
+
 - **Households:** 17,547
 - **Average consumption:** 9.13 kWh/day
 - **Median consumption:** ~7.5 kWh/day
@@ -57,17 +61,20 @@ This phase implemented a comprehensive exploratory data analysis (EDA) of the ho
 ### Temporal Patterns
 
 #### Day-of-Week
+
 - Modest weekday vs weekend differences
 - Weekend/weekday ratio: ~1.0 (relatively balanced)
 - Some households show strong weekly cycles
 
 #### Seasonality
+
 - **Winter-dominant** consumption pattern overall
 - Winter/summer ratio: >1.0 (higher winter consumption)
 - Clear seasonal variation in most households
 - Some households show opposite patterns (AC-dominant)
 
 #### Trends
+
 - Mix of increasing, stable, and decreasing trends
 - Most households show relatively stable consumption
 - Some significant trend outliers exist
@@ -91,6 +98,7 @@ Distribution shows potential for effective clustering.
 ## 🔍 Important Insights for Next Phases
 
 ### For Preprocessing (Phase 2):
+
 1. **Handle zero-consumption days:**
    - Decide: impute, flag, or treat as valid?
    - ~2,700 households have >5% zero days
@@ -108,6 +116,7 @@ Distribution shows potential for effective clustering.
    - Zero-consumption frequency
 
 ### For Clustering (Phase 3):
+
 1. **Promising features:**
    - Mean consumption
    - Coefficient of variation
@@ -125,6 +134,7 @@ Distribution shows potential for effective clustering.
    - Handle "Intermittent/Vacant" group separately?
 
 ### For Forecasting (Phase 4):
+
 1. **Model features:**
    - Lag features (1, 7, 14, 30 days)
    - Seasonal indicators
@@ -140,6 +150,7 @@ Distribution shows potential for effective clustering.
 ## 📈 Visualizations Created
 
 The EDA notebook includes:
+
 - Distribution histograms (mean, std, CV, range, zeros, skewness)
 - Box plots (outlier visualization)
 - Sample time series (15 random households)
@@ -198,6 +209,7 @@ print(stats.head())
 ## ✅ Completed Tasks Checklist
 
 ### 1.1 Data Loading & Validation
+
 - [x] 1.1.1 Load both CSV files and verify dimensions
 - [x] 1.1.2 Check for missing values (NaN, zeros, negatives)
 - [x] 1.1.3 Verify household IDs match across 2023 and 2024
@@ -205,6 +217,7 @@ print(stats.head())
 - [x] 1.1.5 Document any data quality issues
 
 ### 1.2 Descriptive Statistics
+
 - [x] 1.2.1 Compute per-household statistics
 - [x] 1.2.2 Identify outlier households
 - [x] 1.2.3 Analyze overall distribution of consumption values
@@ -212,6 +225,7 @@ print(stats.head())
 - [x] 1.2.5 Detect zero-consumption periods
 
 ### 1.3 Temporal Pattern Analysis
+
 - [x] 1.3.1 Plot sample time series (15 households)
 - [x] 1.3.2 Aggregate consumption by day-of-week
 - [x] 1.3.3 Aggregate consumption by month
@@ -220,6 +234,7 @@ print(stats.head())
 - [x] 1.3.6 Analyze trends (increasing/decreasing consumption)
 
 ### 1.4 Initial Clustering Insights
+
 - [x] 1.4.1 Create correlation matrix between random households
 - [x] 1.4.2 Visualize consumption distributions
 - [x] 1.4.3 Identify preliminary consumption groups
@@ -233,6 +248,7 @@ print(stats.head())
 Timeline: Week 2-3 (March 19 - April 1, 2026)
 
 Priority tasks:
+
 1. Decide on zero-consumption handling strategy
 2. Implement data cleaning pipeline
 3. Extract features for clustering (statistical, temporal, seasonal)
