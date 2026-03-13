@@ -1,6 +1,7 @@
 # 📌 How to Resume Notebook Execution
 
 ## Problem
+
 Running all cells from the start takes too long (especially feature extraction which processes 17,547 households).
 
 ## Solution: Save & Load Checkpoints
@@ -52,7 +53,7 @@ print(f"✅ Loaded features: {df_features.shape}")
 ## Quick Resume Workflow
 
 ```
-Cell 1 (Imports) 
+Cell 1 (Imports)
    ↓
 Load checkpoint_cleaned_data.csv
    ↓
