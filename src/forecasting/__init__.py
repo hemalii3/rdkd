@@ -1,1 +1,1 @@
-"""Forecasting module for time series prediction models."""
+"""Forecasting package — point and probabilistic household energy forecasting."""

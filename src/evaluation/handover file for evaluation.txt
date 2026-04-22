@@ -1,0 +1,237 @@
+
+  KDD SS 2026 
+  Leveraging Clustering for Large-Scale Time Series Forecasting
+
+
+to run global baseline evaluation and finalize results
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 1 — WHAT THE PROJECT IS
+────────────────────────────────────────────────────────────────────────────────
+
+The project clusters 17,547 Austrian households by their 2023 energy consumption
+patterns, then trains one LightGBM forecasting model per cluster to predict daily
+consumption for all of 2024.
+
+The assignment requires two things from you:
+  1. Evaluate the cluster-based models (already done — results exist)
+  2. Train and evaluate a GLOBAL baseline model (not yet compared properly)
+
+The global model already exists as a saved .pkl file. You just need to score it
+against the 2024 ground truth and compare its MAE to the cluster models.
+This single comparison number is the headline result of the entire project.
+
+Cluster model overall MAE = 2.1749 kWh/day   ← already computed
+Global model MAE          = ??? kWh/day        ← YOU need to compute this
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 2 — PROJECT LOCATION AND HOW TO RUN
+────────────────────────────────────────────────────────────────────────────────
+
+Project root
+RDK Project (3)/
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 3 — FOLDER STRUCTURE
+────────────────────────────────────────────────────────────────────────────────
+
+RDK Project (3)/
+├── Data/
+│   ├── sample_23.csv          2023 training data. Wide format: rows = households,
+│   │                          columns = dates. 17,547 × 365. NEVER use for eval.
+│   └── sample_24.csv          2024 test data. Wide format: 17,547 × 366 (leap year).
+│                              T
+│
+├── notebooks/
+│   ├── 01_EDA.ipynb           Exploratory analysis. Read-only, no outputs needed.
+│   ├── 02_Preprocessing_Features.ipynb   Feature engineering. Already run.
+│   ├── 03_Clustering_Experiments.ipynb   Clustering. Already run.
+│   ├── 04_Forecasting.ipynb   Main forecasting. ALREADY RUN. All outputs exist.
+│   └── 05_Probabilistic_Forecasting.ipynb   . ALREADY RUN. Adds intervals.
+│
+├── src/
+│   ├── utils/
+│   │   ├── config.py          All constants: RANDOM_SEED=42, FINAL_K=4, paths, etc.
+│   │   └── data_loader.py     load_train_data() and load_test_data() functions.
+│   ├── preprocessing/         Data cleaning and feature engineering classes.
+│   ├── clustering/            HouseholdClusterer and ClusteringEvaluator classes.
+│   ├── forecasting/           ( unused — main logic is in NB04.)
+│   └── evaluation/             
+│
+└── results/                   ALL OUTPUTS ARE HERE. 
+    ├── figures/               All saved plots (.png files).
+    ├── metrics/               CSV files with MAE, RMSE, R² results.
+    ├── models/                Trained LightGBM .pkl files.
+    │   └── probabilistic/     Quantile model .pkl files (from NB05).
+    └── predictions/           Prediction CSV files.
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 4 — FILES FOR EVALUATION 
+────────────────────────────────────────────────────────────────────────────────
+
+  results/predictions/predictions_2024.csv
+    The main prediction file from NB04. 6,422,202 rows.
+    Columns: household_id, date, predicted, actual, cluster, cluster_name, model_used
+    The 'actual' column is already joined in — it comes from sample_24.csv.
+    This is what you use to evaluate cluster model performance.
+
+  results/predictions/predictions_2024_probabilistic.csv
+    Same but with prediction intervals from NB05. 6,422,202 rows.
+    Columns: household_id, date, lower, predicted, upper, actual, cluster,
+             cluster_name, model_used, interval_width
+
+  results/models/lgbm_global.pkl
+    The trained global LightGBM model. Trained on all 16,494 regular households
+    using 2023 data. This is the dataset-level baseline the assignment requires.
+    You need to run this model on 2024 features and compute its MAE.
+
+  results/models/lgbm_cluster_0.pkl through lgbm_cluster_3.pkl
+    The four cluster-specific models. Already evaluated in NB04.
+
+  results/diagnostics/cluster_assignments.csv
+    Maps every household_id to its cluster label (-3, -2, -1, 0, 1, 2, or 3).
+    Negative labels = degenerate households. Used by NB04 and needed if you
+    re-run any feature engineering.
+
+  results/metrics/forecast_metrics_per_cluster.csv
+    Per-cluster MAE, RMSE, MAPE, R² from NB04. Already computed.
+    cluster, cluster_name, n_households, n_rows, mae, rmse, mape, r2
+
+  results/metrics/forecast_metrics_overall.csv
+    Single row: overall MAE = 2.1749, RMSE = 4.9824, R² = 0.828.
+
+  results/metrics/forecast_metrics_probabilistic.csv
+    Per-cluster metrics from NB05 including coverage and Winkler score.
+
+  results/metrics/household_coverage.csv
+    Per-household coverage, PIAW, and MAE from NB05. 17,547 rows.
+
+
+───────────────────────────────────────────────────────────────────────────
+results so far
+────────────────────────────────────────────────────────────────────────────────
+
+CLUSTERING RESULTS:
+  Total households          : 17,547
+  Regular households        : 16,494  (94.0%)
+  Degenerate households     : 1,053   (6.0%)
+    All-zero (-1)           : 154
+    Near-constant (-2)      : 398
+    Zero-heavy (-3)         : 501
+  Final k                   : 4  (algorithm suggested 3; chose 4 for interpretability)
+  Cluster 0 (moderate_winter_leaning)              : 6,359 HH
+  Cluster 1 (strong_winter_peaking_high_routine)   : 2,757 HH
+  Cluster 2 (lower_flatter_weekend_lift)           : 5,807 HH
+  Cluster 3 (summer_peaking)                       : 1,571 HH
+
+CLUSTER MODEL PERFORMANCE (from results/metrics/forecast_metrics_per_cluster.csv):
+  Cluster  Name                              N HH   MAE     RMSE    R²
+  -------  --------------------------------  -----  ------  ------  -----
+  -3       zero_heavy                          501  4.4039  11.709  0.257
+  -2       near_constant                       398  0.3351   1.167  0.356
+  -1       all_zero                            154  0.0804   1.479 -0.003
+   0       moderate_winter_leaning           6,359  1.9526   4.334  0.815
+   1       strong_winter_peaking_high_routine 2,757  3.1488   5.909  0.884
+   2       lower_flatter_weekend_lift         5,807  1.9536   4.504  0.776
+   3       summer_peaking                    1,571  2.1445   4.549  0.885
+
+OVERALL CLUSTER MODEL PERFORMANCE:
+  MAE   : 2.1749 kWh/day
+  RMSE  : 4.9824 kWh/day
+  R²    : 0.828
+  (Reported as average household MAE per assignment instructions)
+
+PROBABILISTIC FORECASTING PERFORMANCE (from NB05):
+  Nominal interval coverage target  : 80%  (q0.10 to q0.90)
+  Actual coverage achieved          : 76.2%
+  Mean interval width (PIAW)        : 6.20 kWh/day
+  Winkler score                     : 10.578  (lower is better)
+  Cluster 1 PIAW (winter peak)      : 8.53 kWh/day  (widest — correct behaviour)
+  Cluster 2 PIAW (flat)             : 5.94 kWh/day  (narrowest — most certain)
+
+TOP 3 FEATURES BY IMPORTANCE (global model):
+  1. lag_1          (score 3882)  — yesterday's consumption
+  2. day_of_year    (score 3484)  — seasonal position
+  3. household_mean (score 2842)  — long-run average
+
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 6 — FIGURES
+────────────────────────────────────────────────────────────────────────────────
+ figures are in results/figures/.
+
+FROM NB04:
+  feature_importance_global.png      Top 14 features, horizontal bar chart.
+                                     USE IN: 'Feature Importance' slide.
+
+  actual_vs_predicted_clusters.png   2×2 grid. Mean actual vs predicted per
+                                     cluster across all 366 days of 2024.
+                                     USE IN: 'Results Deep Dive' slide.
+                                     NOTE: Cluster 1 visibly underpredicts
+                                     Jan/Feb peak — good talking point.
+
+  residuals_per_cluster.png          1×4 residual histograms. Cluster 1 shows
+                                     positive skew (underprediction). Cluster -3
+                                     shows very wide tails.
+                                     USE IN: Discussion of limitations.
+
+FROM NB05:
+  prob_intervals_per_cluster.png     2×2 grid with shaded 80% PI per cluster.
+                                     USE IN: Probabilistic forecasting slide.
+                                     Cluster 1's wide band is clearly visible.
+
+  prob_cluster1_winter_focus.png     Cluster 1 full year with winter months
+                                     highlighted in orange. Has an annotation
+                                     showing the peak interval width.
+                                     USE IN: Cluster 1 deep dive.
+
+  prob_interval_width_distribution.png   Box plots + seasonal width curve.
+                                     Shows cluster 1 width peaks in winter,
+                                     cluster 3 peaks in summer.
+
+  prob_household_coverage.png        Coverage histogram for all 17,547 households.
+                                     Mean coverage = 76.2%. Shows distribution
+                                     around the 80% target.
+
+  prob_calibration_scatter.png       Coverage vs PIAW scatter per cluster.
+
+  prob_example_household_c1.png      One real household (ID 151979) from cluster 1.
+                                     Full 2024 trace with actual vs interval.
+                                     Coverage=75.1%, PIAW=8.21 kWh, MAE=2.90.
+                                     USE IN: Most concrete single-household example.
+
+────────────────────────────────────────────────────────────────────────────────
+SECTION 7 — REFERENCE NUMBERS
+────────────────────────────────────────────────────────────────────────────────
+
+Total households          : 17,547
+Training period           : 2023-01-01 to 2023-12-31  (365 days)
+Test period               : 2024-01-01 to 2024-12-31  (366 days, leap year)
+Regular households        : 16,494
+Degenerate households     : 1,053
+Final clusters            : 4  (k=4)
+Clustering method         : Ward hierarchical on 32 weighted features
+Forecasting method        : LightGBM, objective=regression_l1 (MAE)
+Number of features        : 14  (4 lags + 6 rolling + 3 calendar + 1 household mean)
+Training rows per cluster : C0=2.13M, C1=923K, C2=1.95M, C3=526K
+Global training rows      : 5.53M
+
+Cluster model overall MAE : 2.1749 kWh/day
+Cluster model overall R²  : 0.828
+Global model MAE          : RUN evaluate_global.py
+
+Best cluster MAE          : 1.953  (clusters 0 and 2)
+Worst regular cluster MAE : 3.149  (cluster 1, strong winter peak)
+Best cluster R²           : 0.885  (cluster 3, summer peaking)
+
+Top feature               : lag_1  (yesterday's consumption, score 3882)
+Second feature            : day_of_year  (seasonality, score 3484)
+
+Probabilistic coverage    : 76.2%  (target 80%)
+Mean interval width       : 6.20 kWh/day
+Cluster 1 interval width  : 8.53 kWh/day  (widest)
+
+

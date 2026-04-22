@@ -1,388 +1,554 @@
-"""Feature Engineering Module for Time Series Clustering.
+"""Feature engineering module for feature-based household clustering.
 
-This module extracts comprehensive features from household energy
-consumption time series for clustering analysis.
+This module is intentionally focused on Method 1 of the project:
+feature-based clustering followed by Ward hierarchical clustering.
+
+It extracts a compact, interpretable set of household-level features from
+the 2023 daily energy consumption panel. k-Shape and DTW-based methods
+should operate on sequence data directly and should not use this module
+as their main input pipeline.
 """
 
-import pandas as pd
-import numpy as np
-from typing import Dict, List, Tuple
-from scipy import stats, signal
-from scipy.fft import fft
-from statsmodels.tsa.seasonal import seasonal_decompose
+from __future__ import annotations
 import logging
+from typing import Dict, List, Tuple, TypedDict
+import numpy as np
+import pandas as pd
+
+from src.preprocessing.data_cleaning import z_normalize_rows
+from src.utils.config import FEATURE_INCLUDE_NORMALIZED_SHAPE_BLOCK
 
 logger = logging.getLogger(__name__)
 
 
+class FeatureMetadata(TypedDict):
+    """Metadata returned with the compact feature set."""
+
+    feature_names: List[str]
+    feature_blocks: Dict[str, List[str]]
+    n_features: int
+    notes: Dict[str, str]
+
+
+# =============================================================================
+# Internal helpers
+# =============================================================================
+
+def _safe_autocorr(series: np.ndarray, lag: int) -> float:
+    """Compute lagged autocorrelation safely for a 1D numeric series."""
+    if lag <= 0 or lag >= len(series):
+        return float("nan")
+
+    x1 = np.asarray(series[:-lag], dtype=float)
+    x2 = np.asarray(series[lag:], dtype=float)
+
+    if np.std(x1) < 1e-10 or np.std(x2) < 1e-10:
+        return float("nan")
+
+    return float(np.corrcoef(x1, x2)[0, 1])
+
+
+def _safe_linear_slope(y: np.ndarray) -> float:
+    """Compute linear trend slope safely."""
+    y = np.asarray(y, dtype=float)
+    if np.std(y) < 1e-10:
+        return 0.0
+
+    x = np.arange(len(y), dtype=float)
+    slope = np.polyfit(x, y, 1)[0]
+    return float(slope)
+
+
+def _safe_normalized_slope(y: np.ndarray) -> float:
+    """Compute slope after z-normalizing the input series."""
+    y = np.asarray(y, dtype=float)
+    std = float(np.std(y))
+    if std < 1e-10:
+        return 0.0
+    y_norm = (y - float(np.mean(y))) / (std + 1e-10)
+    return _safe_linear_slope(y_norm)
+
+
+def _monthly_mean_matrix(data: pd.DataFrame) -> pd.DataFrame:
+    """Return monthly household means with Jan-Dec columns."""
+    dates = pd.to_datetime(data.columns)
+    month_map = {
+        1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr",
+        5: "May", 6: "Jun", 7: "Jul", 8: "Aug",
+        9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec",
+    }
+
+    monthly = pd.DataFrame(index=data.index)
+    for month_num, month_name in month_map.items():
+        cols = [col for col, dt in zip(data.columns, dates) if dt.month == month_num]
+        monthly[month_name] = data[cols].mean(axis=1) if cols else np.nan
+
+    return monthly
+
+
+def _dayofweek_mean_matrix(data: pd.DataFrame) -> pd.DataFrame:
+    """Return mean consumption by day of week for each household."""
+    dates = pd.to_datetime(data.columns)
+    day_name_map = {
+        0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu",
+        4: "Fri", 5: "Sat", 6: "Sun",
+    }
+
+    dow = pd.DataFrame(index=data.index)
+    for day_num, day_name in day_name_map.items():
+        cols = [col for col, dt in zip(data.columns, dates) if dt.dayofweek == day_num]
+        dow[day_name] = data[cols].mean(axis=1) if cols else np.nan
+
+    return dow
+
+
+# =============================================================================
+# Feature engineering class
+# =============================================================================
+
 class FeatureEngineer:
-    """Comprehensive feature extraction for time series clustering."""
-    
+    """Feature extractor for Method 1: feature-based clustering."""
+
     def __init__(self, random_seed: int = 42):
-        """Initialize feature engineer.
-        
-        Args:
-            random_seed: Random seed for reproducibility.
-        """
         self.random_seed = random_seed
         np.random.seed(random_seed)
-        self.feature_names = []
-    
-    def extract_statistical_features(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Extract statistical features from time series.
-        
-        Args:
-            data: DataFrame with households as rows, days as columns.
-        
-        Returns:
-            DataFrame with statistical features per household.
+
+        self.feature_names: List[str] = []
+        self.feature_blocks: Dict[str, List[str]] = {}
+
+    # -------------------------------------------------------------------------
+    # Feature blocks
+    # -------------------------------------------------------------------------
+
+    def extract_level_dispersion_features(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Extract level and dispersion features.
+
+        These features capture household scale, variability, and sparsity.
         """
         features = pd.DataFrame(index=data.index)
-        
-        # Basic statistics
-        features['mean'] = data.mean(axis=1)
-        features['median'] = data.median(axis=1)
-        features['std'] = data.std(axis=1)
-        features['min'] = data.min(axis=1)
-        features['max'] = data.max(axis=1)
-        features['range'] = features['max'] - features['min']
-        
-        # Quantiles
-        features['q25'] = data.quantile(0.25, axis=1)
-        features['q50'] = data.quantile(0.50, axis=1)
-        features['q75'] = data.quantile(0.75, axis=1)
-        features['iqr'] = features['q75'] - features['q25']
-        
-        # Moments
-        features['skewness'] = data.apply(lambda x: stats.skew(x), axis=1)
-        features['kurtosis'] = data.apply(lambda x: stats.kurtosis(x), axis=1)
-        
-        # Coefficient of variation
-        features['cv'] = features['std'] / (features['mean'] + 1e-10)
-        
-        # Zero consumption
-        features['zero_count'] = (data == 0).sum(axis=1)
-        features['zero_pct'] = (features['zero_count'] / data.shape[1]) * 100
-        
-        # Variance
-        features['variance'] = data.var(axis=1)
-        
-        logger.info(f"Extracted {len(features.columns)} statistical features")
+
+        features["mean"] = data.mean(axis=1)
+        features["std"] = data.std(axis=1)
+
+        features["cv"] = np.where(
+            features["mean"].abs() < 1e-8,
+            np.nan,
+            features["std"] / features["mean"].abs(),
+        )
+
+        features["zero_pct"] = ((data == 0).sum(axis=1) / data.shape[1]) * 100
+
+        logger.info(
+            "Extracted %d level/dispersion features",
+            len(features.columns),
+        )
         return features
-    
-    def extract_temporal_features(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Extract temporal features from time series.
-        
-        Args:
-            data: DataFrame with households as rows, date columns.
-        
-        Returns:
-            DataFrame with temporal features.
+
+    def extract_weekly_features(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Extract weekly-structure features.
+
+        Includes mean consumption by weekday, weekday/weekend contrast,
+        and lag-7 autocorrelation as a measure of weekly persistence.
         """
         features = pd.DataFrame(index=data.index)
+
+        dow = _dayofweek_mean_matrix(data)
+        dow = dow.rename(columns={col: f"dow_{col}" for col in dow.columns})
+        features = pd.concat([features, dow], axis=1)
+
+        weekday_mean = dow[[f"dow_{d}" for d in ["Mon", "Tue", "Wed", "Thu", "Fri"]]].mean(axis=1)
+        weekend_mean = dow[[f"dow_{d}" for d in ["Sat", "Sun"]]].mean(axis=1)
+
+        features["weekend_weekday_contrast"] = (
+            (weekend_mean - weekday_mean) /
+            (weekend_mean + weekday_mean + 1e-6)
+        )
+
+        features["weekday_range"] = dow.max(axis=1) - dow.min(axis=1)
+
+        weekly_total = dow.sum(axis=1) + 1e-6
+        features["weekend_share"] = (
+            dow[["dow_Sat", "dow_Sun"]].sum(axis=1) / weekly_total
+        )
+
+        features["weekday_std"] = dow.std(axis=1)
+
+        features["autocorr_lag_7"] = data.apply(
+            lambda row: _safe_autocorr(np.asarray(row.values, dtype=float), lag=7),
+            axis=1,
+        )
+
+        logger.info("Extracted %d weekly features", len(features.columns))
+        return features
+
+    
+    def extract_energy_profile_features(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Extract energy-domain profile features for customer grouping.
+
+        These features summarize base load, seasonal concentration, peak timing,
+        and burstiness in a scale-aware way.
+        """
+        features = pd.DataFrame(index=data.index)
+
+        monthly = _monthly_mean_matrix(data)
+        annual_mean = data.mean(axis=1) + 1e-6
+
+        # Base load vs seasonal load
+        monthly_min = monthly.min(axis=1)
+        monthly_max = monthly.max(axis=1)
+
+        features["base_load_ratio"] = monthly_min / annual_mean
+        features["seasonal_peak_ratio"] = monthly_max / annual_mean
+        features["seasonal_range_ratio"] = (monthly_max - monthly_min) / annual_mean
+
+        # Seasonal energy shares
         dates = pd.to_datetime(data.columns)
-        
-        # Day-of-week averages (Mon=0, Sun=6)
-        for day_num in range(7):
-            day_cols = [col for col, date in zip(data.columns, dates) if date.dayofweek == day_num]
-            if day_cols:
-                features[f'dow_{day_num}_mean'] = data[day_cols].mean(axis=1)
-        
-        # Weekday vs weekend
-        weekday_cols = [col for col, date in zip(data.columns, dates) if date.dayofweek < 5]
-        weekend_cols = [col for col, date in zip(data.columns, dates) if date.dayofweek >= 5]
-        
-        features['weekday_mean'] = data[weekday_cols].mean(axis=1) if weekday_cols else 0
-        features['weekend_mean'] = data[weekend_cols].mean(axis=1) if weekend_cols else 0
-        features['weekend_weekday_ratio'] = features['weekend_mean'] / (features['weekday_mean'] + 1e-10)
-        
-        # Monthly averages (Jan=1, Dec=12)
-        for month_num in range(1, 13):
-            month_cols = [col for col, date in zip(data.columns, dates) if date.month == month_num]
-            if month_cols:
-                features[f'month_{month_num}_mean'] = data[month_cols].mean(axis=1)
-        
-        # Quarterly averages
-        for quarter in range(1, 5):
-            quarter_months = [(quarter-1)*3 + i for i in range(1, 4)]
-            quarter_cols = [col for col, date in zip(data.columns, dates) if date.month in quarter_months]
-            if quarter_cols:
-                features[f'quarter_{quarter}_mean'] = data[quarter_cols].mean(axis=1)
-        
-        # Trend coefficient (linear regression slope)
-        features['trend_slope'] = data.apply(
-            lambda row: stats.linregress(np.arange(len(row)), row.values)[0], 
-            axis=1
-        )
-        
-        logger.info(f"Extracted {len(features.columns)} temporal features")
+        winter_cols = [col for col, dt in zip(data.columns, dates) if dt.month in [12, 1, 2]]
+        summer_cols = [col for col, dt in zip(data.columns, dates) if dt.month in [6, 7, 8]]
+
+        annual_total = data.sum(axis=1) + 1e-6
+        winter_total = data[winter_cols].sum(axis=1) if winter_cols else pd.Series(0.0, index=data.index)
+        summer_total = data[summer_cols].sum(axis=1) if summer_cols else pd.Series(0.0, index=data.index)
+
+        features["winter_share"] = winter_total / annual_total
+        features["summer_share"] = summer_total / annual_total
+
+        # Concentration of monthly demand
+        monthly_shares = monthly.div(monthly.sum(axis=1) + 1e-6, axis=0)
+        top3_share = np.sort(monthly_shares.to_numpy(dtype=float), axis=1)[:, -3:].sum(axis=1)
+        features["top3_month_share"] = top3_share
+
+        monthly_entropy = -(monthly_shares * np.log(monthly_shares + 1e-10)).sum(axis=1)
+        features["monthly_entropy"] = monthly_entropy
+
+        # Peak / trough timing (cyclic encoding)
+        peak_month_idx = monthly.to_numpy(dtype=float).argmax(axis=1) + 1
+        trough_month_idx = monthly.to_numpy(dtype=float).argmin(axis=1) + 1
+
+        features["peak_month_sin"] = np.sin(2 * np.pi * peak_month_idx / 12.0)
+        features["peak_month_cos"] = np.cos(2 * np.pi * peak_month_idx / 12.0)
+        features["trough_month_sin"] = np.sin(2 * np.pi * trough_month_idx / 12.0)
+        features["trough_month_cos"] = np.cos(2 * np.pi * trough_month_idx / 12.0)
+
+        logger.info("Extracted %d energy-profile features", len(features.columns))
         return features
     
-    def extract_seasonality_features(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Extract seasonality features from time series.
-        
-        Args:
-            data: DataFrame with households as rows, date columns.
-        
-        Returns:
-            DataFrame with seasonality features.
+    def extract_normalized_shape_features(self, data: pd.DataFrame) -> pd.DataFrame:
         """
-        features = pd.DataFrame(index=data.index)
-        dates = pd.to_datetime(data.columns)
-        
-        # Winter months (Dec, Jan, Feb)
-        winter_months = [12, 1, 2]
-        winter_cols = [col for col, date in zip(data.columns, dates) if date.month in winter_months]
-        
-        # Summer months (Jun, Jul, Aug)
-        summer_months = [6, 7, 8]
-        summer_cols = [col for col, date in zip(data.columns, dates) if date.month in summer_months]
-        
-        # Spring months (Mar, Apr, May)
-        spring_months = [3, 4, 5]
-        spring_cols = [col for col, date in zip(data.columns, dates) if date.month in spring_months]
-        
-        # Fall months (Sep, Oct, Nov)
-        fall_months = [9, 10, 11]
-        fall_cols = [col for col, date in zip(data.columns, dates) if date.month in fall_months]
-        
-        features['winter_mean'] = data[winter_cols].mean(axis=1) if winter_cols else 0
-        features['summer_mean'] = data[summer_cols].mean(axis=1) if summer_cols else 0
-        features['spring_mean'] = data[spring_cols].mean(axis=1) if spring_cols else 0
-        features['fall_mean'] = data[fall_cols].mean(axis=1) if fall_cols else 0
-        
-        # Seasonal ratios
-        features['winter_summer_ratio'] = features['winter_mean'] / (features['summer_mean'] + 1e-10)
-        features['seasonal_amplitude'] = (
-            features[['winter_mean', 'summer_mean', 'spring_mean', 'fall_mean']].max(axis=1) -
-            features[['winter_mean', 'summer_mean', 'spring_mean', 'fall_mean']].min(axis=1)
+        Shape-focused features derived from row-wise z-normalized series.
+        These features are intended to capture annual and weekly behaviour
+        without reintroducing raw consumption magnitude.
+        """
+        normalized_df = z_normalize_rows(data)
+
+        norm_monthly = _monthly_mean_matrix(normalized_df).rename(
+            columns=lambda c: f"norm_month_{c}"
         )
-        
-        # Seasonal decomposition features (sample-based due to computational cost)
-        # We'll compute for a sample and use aggregate metrics
-        try:
-            sample_series = data.iloc[0].values
-            if len(sample_series) >= 14:  # Need at least 2 periods for weekly seasonality
-                decomposition = seasonal_decompose(sample_series, model='additive', period=7, extrapolate_trend='freq')
-                # Use variance of seasonal component as a feature
-                features['seasonal_strength'] = data.apply(
-                    lambda row: np.var(seasonal_decompose(row.values, model='additive', period=7, extrapolate_trend='freq').seasonal) 
-                    if len(row) >= 14 else 0, 
-                    axis=1
-                )
-        except Exception as e:
-            logger.warning(f"Seasonal decomposition failed: {e}")
-            features['seasonal_strength'] = 0
-        
-        logger.info(f"Extracted {len(features.columns)} seasonality features")
+        norm_dow = _dayofweek_mean_matrix(normalized_df).rename(
+            columns=lambda c: f"norm_dow_{c}"
+        )
+
+        features = pd.concat([norm_monthly, norm_dow], axis=1)
+
+        # Existing summary features
+        features["norm_monthly_profile_std"] = norm_monthly.std(axis=1)
+        features["norm_monthly_profile_range"] = norm_monthly.max(axis=1) - norm_monthly.min(axis=1)
+
+        features["norm_winter_mean"] = norm_monthly[
+            ["norm_month_Dec", "norm_month_Jan", "norm_month_Feb"]
+        ].mean(axis=1)
+        features["norm_summer_mean"] = norm_monthly[
+            ["norm_month_Jun", "norm_month_Jul", "norm_month_Aug"]
+        ].mean(axis=1)
+        features["norm_winter_summer_diff"] = (
+            features["norm_winter_mean"] - features["norm_summer_mean"]
+        )
+
+        features["norm_weekday_mean"] = norm_dow[
+            ["norm_dow_Mon", "norm_dow_Tue", "norm_dow_Wed", "norm_dow_Thu", "norm_dow_Fri"]
+        ].mean(axis=1)
+        features["norm_weekend_mean"] = norm_dow[
+            ["norm_dow_Sat", "norm_dow_Sun"]
+        ].mean(axis=1)
+        features["norm_weekend_weekday_diff"] = (
+            features["norm_weekend_mean"] - features["norm_weekday_mean"]
+        )
+
+        # quarterly normalized seasonality
+        features["norm_q1_mean"] = norm_monthly[
+            ["norm_month_Jan", "norm_month_Feb", "norm_month_Mar"]
+        ].mean(axis=1)
+        features["norm_q2_mean"] = norm_monthly[
+            ["norm_month_Apr", "norm_month_May", "norm_month_Jun"]
+        ].mean(axis=1)
+        features["norm_q3_mean"] = norm_monthly[
+            ["norm_month_Jul", "norm_month_Aug", "norm_month_Sep"]
+        ].mean(axis=1)
+        features["norm_q4_mean"] = norm_monthly[
+            ["norm_month_Oct", "norm_month_Nov", "norm_month_Dec"]
+        ].mean(axis=1)
+
+        # seasonal transition features
+        features["norm_spring_minus_winter"] = features["norm_q2_mean"] - features["norm_q1_mean"]
+        features["norm_summer_minus_spring"] = features["norm_q3_mean"] - features["norm_q2_mean"]
+        features["norm_autumn_minus_summer"] = features["norm_q4_mean"] - features["norm_q3_mean"]
+        features["norm_winter_minus_autumn"] = features["norm_q1_mean"] - features["norm_q4_mean"]
+
+        # normalized peak / trough timing (cyclic)
+        peak_month_idx = norm_monthly.to_numpy(dtype=float).argmax(axis=1) + 1
+        trough_month_idx = norm_monthly.to_numpy(dtype=float).argmin(axis=1) + 1
+
+        features["norm_peak_month_sin"] = np.sin(2 * np.pi * peak_month_idx / 12.0)
+        features["norm_peak_month_cos"] = np.cos(2 * np.pi * peak_month_idx / 12.0)
+        features["norm_trough_month_sin"] = np.sin(2 * np.pi * trough_month_idx / 12.0)
+        features["norm_trough_month_cos"] = np.cos(2 * np.pi * trough_month_idx / 12.0)
+
+        # concentration / smoothness of normalized annual shape
+        abs_norm_monthly = norm_monthly.abs()  # keep pandas DataFrame type
+        row_sums = abs_norm_monthly.sum(axis=1).replace(0, np.nan)
+        norm_month_probs = abs_norm_monthly.div(row_sums, axis=0).fillna(0.0)
+
+        log_probs = norm_month_probs.clip(lower=1e-10).apply(np.log)
+        features["norm_month_entropy"] = -(norm_month_probs * log_probs).sum(axis=1)
+
+        norm_month_diff = norm_monthly.diff(axis=1)
+        features["norm_month_diff_abs_mean"] = norm_month_diff.abs().mean(axis=1)
+        features["norm_month_diff_std"] = norm_month_diff.std(axis=1)
+
+        # normalized weekly roughness
+        features["norm_dow_range"] = norm_dow.max(axis=1) - norm_dow.min(axis=1)
+        norm_dow_diff = norm_dow.diff(axis=1)
+        features["norm_dow_diff_abs_mean"] = norm_dow_diff.abs().mean(axis=1)
+
+        logger.info("Extracted %d normalized-shape features", len(features.columns))
         return features
-    
-    def extract_variability_features(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Extract variability features from time series.
-        
-        Args:
-            data: DataFrame with households as rows, days as columns.
-        
-        Returns:
-            DataFrame with variability features.
+
+    def extract_persistence_volatility_features(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Extract persistence and volatility features.
+
+        These features summarize short-term dependence and roughness.
         """
         features = pd.DataFrame(index=data.index)
-        
-        # Rolling window standard deviation (transpose to apply rolling along rows)
-        features['rolling_std_7'] = data.T.rolling(window=7).std().T.mean(axis=1)
-        features['rolling_std_30'] = data.T.rolling(window=30).std().T.mean(axis=1)
-        
-        # Number of peaks and valleys
-        features['num_peaks'] = data.apply(
-            lambda row: len(signal.find_peaks(row.values)[0]), 
-            axis=1
+
+        features["autocorr_lag_1"] = data.apply(
+            lambda row: _safe_autocorr(np.asarray(row.values, dtype=float), lag=1),
+            axis=1,
         )
-        features['num_valleys'] = data.apply(
-            lambda row: len(signal.find_peaks(-row.values)[0]), 
-            axis=1
+        features["autocorr_lag_30"] = data.apply(
+            lambda row: _safe_autocorr(np.asarray(row.values, dtype=float), lag=30),
+            axis=1,
         )
-        
-        # Autocorrelation at different lags
-        for lag in [1, 7, 30]:
-            features[f'autocorr_lag_{lag}'] = data.apply(
-                lambda row: pd.Series(row.values).autocorr(lag=lag) if len(row) > lag else 0,
-                axis=1
-            )
-        
-        # Difference statistics (day-to-day changes)
+
+        rolling_std_7 = data.T.rolling(window=7).std().T.mean(axis=1)
+        rolling_std_30 = data.T.rolling(window=30).std().T.mean(axis=1)
+        features["rolling_std_7"] = rolling_std_7
+        features["rolling_std_30"] = rolling_std_30
+
         diffs = data.diff(axis=1)
-        features['diff_mean'] = diffs.mean(axis=1)
-        features['diff_std'] = diffs.std(axis=1)
-        features['diff_max'] = diffs.max(axis=1)
-        features['diff_min'] = diffs.min(axis=1)
-        
-        logger.info(f"Extracted {len(features.columns)} variability features")
-        return features
-    
-    def extract_shape_features(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Extract shape-based features from time series.
-        
-        Args:
-            data: DataFrame with households as rows, days as columns.
-        
-        Returns:
-            DataFrame with shape features.
-        """
-        features = pd.DataFrame(index=data.index)
-        
-        # Time series entropy (Shannon entropy)
-        def calculate_entropy(series):
-            """Calculate Shannon entropy of time series."""
-            # Discretize into bins
-            hist, _ = np.histogram(series, bins=20)
-            hist = hist / hist.sum()  # Normalize
-            hist = hist[hist > 0]  # Remove zeros
-            return -np.sum(hist * np.log2(hist))
-        
-        features['entropy'] = data.apply(lambda row: calculate_entropy(row.values), axis=1)
-        
-        # Spectral features (FFT)
-        def extract_spectral_features(series):
-            """Extract spectral features using FFT."""
-            fft_vals = np.abs(fft(series))
-            fft_vals = fft_vals[:len(fft_vals)//2]  # Take positive frequencies
-            
-            # Dominant frequency magnitude
-            dominant_freq_mag = np.max(fft_vals)
-            
-            # Spectral centroid
-            freqs = np.fft.fftfreq(len(series))[:len(series)//2]
-            spectral_centroid = np.sum(freqs * fft_vals) / (np.sum(fft_vals) + 1e-10)
-            
-            # Spectral rolloff (95% of energy)
-            cumsum = np.cumsum(fft_vals)
-            rolloff_idx = np.where(cumsum >= 0.95 * cumsum[-1])[0]
-            spectral_rolloff = freqs[rolloff_idx[0]] if len(rolloff_idx) > 0 else 0
-            
-            return dominant_freq_mag, spectral_centroid, spectral_rolloff
-        
-        spectral = data.apply(lambda row: extract_spectral_features(row.values), axis=1)
-        features['spectral_dominant_freq'] = spectral.apply(lambda x: x[0])
-        features['spectral_centroid'] = spectral.apply(lambda x: x[1])
-        features['spectral_rolloff'] = spectral.apply(lambda x: x[2])
-        
-        # Hurst exponent (approximation using rescaled range)
-        def hurst_exponent(series):
-            """Calculate Hurst exponent (simplified)."""
-            try:
-                lags = range(2, min(20, len(series)//2))
-                tau = [np.std(np.subtract(series[lag:], series[:-lag])) for lag in lags]
-                
-                if len(tau) > 1 and all(t > 0 for t in tau):
-                    poly = np.polyfit(np.log(lags), np.log(tau), 1)
-                    return poly[0]
-                else:
-                    return 0.5  # Neutral value
-            except:
-                return 0.5
-        
-        features['hurst_exponent'] = data.apply(lambda row: hurst_exponent(row.values), axis=1)
-        
-        # Linearity (R² of linear fit)
-        features['linearity'] = data.apply(
-            lambda row: stats.linregress(np.arange(len(row)), row.values)[2]**2,
-            axis=1
+        features["diff_mean"] = diffs.mean(axis=1)
+        features["diff_std"] = diffs.std(axis=1)
+        features["abs_diff_mean"] = diffs.abs().mean(axis=1)
+        features["diff_max"] = diffs.max(axis=1)
+        features["diff_min"] = diffs.min(axis=1)
+
+        q50 = data.quantile(0.50, axis=1) + 1e-6
+        q95 = data.quantile(0.95, axis=1)
+        q99 = data.quantile(0.99, axis=1)
+        max_val = data.max(axis=1)
+
+        features["p95_to_median_ratio"] = q95 / q50
+        features["p99_to_median_ratio"] = q99 / q50
+        features["max_to_p95_ratio"] = max_val / (q95 + 1e-6)
+
+        dates = pd.to_datetime(data.columns)
+        winter_cols = [col for col, dt in zip(data.columns, dates) if dt.month in [12, 1, 2]]
+        summer_cols = [col for col, dt in zip(data.columns, dates) if dt.month in [6, 7, 8]]
+
+        annual_mean = data.mean(axis=1) + 1e-6
+
+        if winter_cols:
+            features["winter_std_norm"] = data[winter_cols].std(axis=1) / annual_mean
+        else:
+            features["winter_std_norm"] = 0.0
+
+        if summer_cols:
+            features["summer_std_norm"] = data[summer_cols].std(axis=1) / annual_mean
+        else:
+            features["summer_std_norm"] = 0.0
+
+        features["winter_summer_volatility_ratio"] = (
+            features["winter_std_norm"] / (features["summer_std_norm"] + 1e-6)
         )
-        
-        logger.info(f"Extracted {len(features.columns)} shape features")
+
+        logger.info(
+            "Extracted %d persistence/volatility features",
+            len(features.columns),
+        )
         return features
     
-    def extract_all_features(
-        self, 
+    
+
+    def extract_trend_features(self, data: pd.DataFrame) -> pd.DataFrame:
+        """Extract simple trend features."""
+        features = pd.DataFrame(index=data.index)
+
+        features["trend_slope"] = data.apply(
+            lambda row: _safe_linear_slope(np.asarray(row.values, dtype=float)),
+            axis=1,
+        )
+        features["trend_slope_normalized"] = data.apply(
+            lambda row: _safe_normalized_slope(np.asarray(row.values, dtype=float)),
+            axis=1,
+        )
+
+        logger.info("Extracted %d trend features", len(features.columns))
+        return features
+    
+    def _select_normalized_shape_block(self, shape_features: pd.DataFrame) -> pd.DataFrame:
+        """Return the standardized normalized-shape feature subset used in Method 1."""
+        selected_columns = [
+            "norm_dow_Mon",
+            "norm_dow_Tue",
+            "norm_dow_Wed",
+            "norm_dow_Thu",
+            "norm_dow_Fri",
+            "norm_dow_Sat",
+            "norm_dow_Sun",
+
+            "norm_month_Jan",
+            "norm_month_Feb",
+            "norm_month_Mar",
+            "norm_month_Apr",
+            "norm_month_May",
+            "norm_month_Jun",
+            "norm_month_Jul",
+            "norm_month_Aug",
+            "norm_month_Sep",
+            "norm_month_Oct",
+            "norm_month_Nov",
+            "norm_month_Dec",
+
+            "norm_monthly_profile_std",
+            "norm_monthly_profile_range",
+            "norm_winter_summer_diff",
+            "norm_weekend_weekday_diff",
+            "norm_month_entropy",
+            "norm_dow_range",
+        ]
+        return shape_features[selected_columns].copy()
+
+    # -------------------------------------------------------------------------
+    # Main Method 1 pipeline
+    # -------------------------------------------------------------------------
+
+    def extract_final_feature_ward_features(
+        self,
         data: pd.DataFrame,
-        include_statistical: bool = True,
-        include_temporal: bool = True,
-        include_seasonality: bool = True,
-        include_variability: bool = True,
-        include_shape: bool = True
-    ) -> pd.DataFrame:
-        """Extract all features from time series.
-        
-        Args:
-            data: DataFrame with households as rows, days as columns.
-            include_statistical: Include statistical features.
-            include_temporal: Include temporal features.
-            include_seasonality: Include seasonality features.
-            include_variability: Include variability features.
-            include_shape: Include shape features.
-        
-        Returns:
-            DataFrame with all extracted features.
-        """
-        all_features = pd.DataFrame(index=data.index)
-        
-        if include_statistical:
-            stat_features = self.extract_statistical_features(data)
-            all_features = pd.concat([all_features, stat_features], axis=1)
-        
-        if include_temporal:
-            temp_features = self.extract_temporal_features(data)
-            all_features = pd.concat([all_features, temp_features], axis=1)
-        
-        if include_seasonality:
-            season_features = self.extract_seasonality_features(data)
-            all_features = pd.concat([all_features, season_features], axis=1)
-        
-        if include_variability:
-            var_features = self.extract_variability_features(data)
-            all_features = pd.concat([all_features, var_features], axis=1)
-        
-        if include_shape:
-            shape_features = self.extract_shape_features(data)
-            all_features = pd.concat([all_features, shape_features], axis=1)
-        
-        self.feature_names = all_features.columns.tolist()
-        
-        logger.info(f"Extracted {len(all_features.columns)} total features for {len(all_features)} households")
-        return all_features
+        return_metadata: bool = False,
+    ) -> pd.DataFrame | Tuple[pd.DataFrame, FeatureMetadata]:
+        """Extract the final shape-first feature set for Ward clustering."""
 
+        if not FEATURE_INCLUDE_NORMALIZED_SHAPE_BLOCK:
+            raise ValueError(
+                "extract_final_feature_ward_features() requires FEATURE_INCLUDE_NORMALIZED_SHAPE_BLOCK=True."
+            )
 
-if __name__ == "__main__":
-    # Test the module
-    from src.utils.data_loader import load_train_data
-    
-    print("Testing Feature Engineering Module...")
-    data = load_train_data()
-    
-    # Test on a small sample for speed
-    sample_data = data.head(100)
-    
-    engineer = FeatureEngineer(random_seed=42)
-    
-    print("\n1. Testing statistical features...")
-    stat_feat = engineer.extract_statistical_features(sample_data)
-    print(f"Shape: {stat_feat.shape}")
-    print(f"Columns: {list(stat_feat.columns)}")
-    
-    print("\n2. Testing temporal features...")
-    temp_feat = engineer.extract_temporal_features(sample_data)
-    print(f"Shape: {temp_feat.shape}")
-    print(f"Columns: {list(temp_feat.columns[:5])}... ({len(temp_feat.columns)} total)")
-    
-    print("\n3. Testing seasonality features...")
-    season_feat = engineer.extract_seasonality_features(sample_data)
-    print(f"Shape: {season_feat.shape}")
-    print(f"Columns: {list(season_feat.columns)}")
-    
-    print("\n4. Testing variability features...")
-    var_feat = engineer.extract_variability_features(sample_data)
-    print(f"Shape: {var_feat.shape}")
-    print(f"Columns: {list(var_feat.columns)}")
-    
-    print("\n5. Testing shape features...")
-    shape_feat = engineer.extract_shape_features(sample_data)
-    print(f"Shape: {shape_feat.shape}")
-    print(f"Columns: {list(shape_feat.columns)}")
-    
-    print("\n6. Testing complete feature extraction...")
-    all_feat = engineer.extract_all_features(sample_data)
-    print(f"Total features: {all_feat.shape}")
-    print(f"Feature names: {len(engineer.feature_names)}")
-    print(f"Sample:\n{all_feat.head()}")
-    
-    print("\n✅ All tests passed!")
+        # Main behavioral block
+        shape_normalized = self._select_normalized_shape_block(
+            self.extract_normalized_shape_features(data)
+        )
+
+        # Weekly block: keep only shape-safe / dependence-oriented signals
+        weekly_all = self.extract_weekly_features(data)
+        weekly = pd.DataFrame(index=data.index)
+        weekly["autocorr_lag_7"] = weekly_all["autocorr_lag_7"]
+
+        # Persistence / roughness block
+        persistence_all = self.extract_persistence_volatility_features(data)
+        persistence = persistence_all[
+            [
+                "autocorr_lag_30",
+                "diff_std",
+            ]
+        ].copy()
+
+        # Trend block: normalized only
+        trend_all = self.extract_trend_features(data)
+        trend = trend_all[
+            [
+                "trend_slope_normalized",
+            ]
+        ].copy()
+
+        energy_profile = pd.DataFrame(index=data.index)
+
+        features = pd.concat(
+            [
+                weekly,
+                shape_normalized,
+                persistence,
+                trend,
+                #energy_profile,
+            ],
+            axis=1,
+        )
+
+        self.feature_names = features.columns.tolist()
+        self.feature_blocks = {
+            "weekly": weekly.columns.tolist(),
+            "shape_normalized": shape_normalized.columns.tolist(),
+            "persistence": persistence.columns.tolist(),
+            "trend": trend.columns.tolist(),
+            #"energy_profile": energy_profile.columns.tolist(),
+        }
+
+        notes = {
+            "weekly": "Weekly dependence features that do not directly encode raw level.",
+            "shape_normalized": "Main behavior block: normalized annual and weekly shape descriptors.",
+            "persistence": "Roughness and short/medium-range dependence features.",
+            "trend": "Normalized trend direction over the year.",
+            #"energy_profile": "Small secondary raw-profile block kept for interpretability.",
+        }
+
+        metadata: FeatureMetadata = {
+            "feature_names": self.feature_names,
+            "feature_blocks": self.feature_blocks,
+            "n_features": len(self.feature_names),
+            "notes": notes,
+        }
+
+        logger.info(
+            "Extracted final Ward feature set with %d features across %d blocks",
+            len(self.feature_names),
+            len(self.feature_blocks),
+        )
+
+        if return_metadata:
+            return features, metadata
+        return features
+    # -------------------------------------------------------------------------
+    # Interpretation helpers
+    # -------------------------------------------------------------------------
+
+    def get_feature_block_map(self) -> Dict[str, List[str]]:
+        """Return the feature-block mapping from the latest extraction."""
+        return self.feature_blocks
+
+    def summarize_feature_groups(self) -> pd.DataFrame:
+        """Summarize feature blocks from the latest extraction."""
+        if not self.feature_blocks:
+            raise ValueError(
+                "No features have been extracted yet. "
+            )
+
+        rows = []
+        for block_name, block_features in self.feature_blocks.items():
+            rows.append(
+                {
+                    "block": block_name,
+                    "n_features": len(block_features),
+                    "features": ", ".join(block_features),
+                }
+            )
+
+        return pd.DataFrame(rows)
