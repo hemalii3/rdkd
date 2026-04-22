@@ -126,7 +126,7 @@ SPECIAL_CLUSTER_LABELS = {
     -99: "degenerate_other"
 }
 
-KEEP_SPECIAL_CLUSTERS_FOR_FORECASTING = False
+KEEP_SPECIAL_CLUSTERS_FOR_FORECASTING = True
 MIN_SPECIAL_CLUSTER_SIZE_FOR_FORECASTING = 300
 
 # =============================================================================
