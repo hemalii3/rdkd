@@ -38,9 +38,9 @@ ENV/
 *~
 
 # Data files (exclude large CSV files from repo)
-Data/*.csv
-data/*.csv
-*.csv
+#Data/*.csv
+#data/*.csv
+#*.csv
 
 # Model files
 *.h5
