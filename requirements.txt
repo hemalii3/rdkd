@@ -8,3 +8,5 @@ jupyter
 ipykernel
 matplotlib
 seaborn
+hdbscan
+lightgbm
