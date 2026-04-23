@@ -1,0 +1,4 @@
+method,avg_household_mae,improvement_vs_global_pct
+feature_ward,2.0965,0.53
+kshape,2.1058,0.09
+global,2.1076,0.0
