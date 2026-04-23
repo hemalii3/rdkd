@@ -50,7 +50,6 @@ ENV/
 models/
 
 # Results
-results/predictions/
 results/models/
 
 # OS
