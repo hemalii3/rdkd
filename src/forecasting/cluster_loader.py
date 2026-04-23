@@ -1,14 +1,19 @@
 """
 cluster_loader.py
 -----------------
-Load cluster assignments saved by notebook 03.
+Load forecasting-ready cluster assignments saved by notebook 03.
 
-The clustering notebook saves two sets of files:
-  - Feature+Ward (primary) : feature_ward_k{k}_forecasting_handoff.csv
-  - k-Shape (benchmark)    : kshape_k{k}_forecasting_handoff.csv
+Expected file types:
+  - Feature+Ward (primary): feature_ward_k{k}_forecasting_handoff.csv
+  - k-Shape (benchmark):    kshape_k{k}_forecasting_handoff.csv
 
-Both have the same format: one row per household, with a 'cluster' column.
-Regular clusters are labelled 0..k-1. Degenerate households are labelled < 0.
+These files are expected to be forecasting-ready, meaning:
+  - one row per household
+  - a 'cluster' column
+  - all cluster labels are regular nonnegative integers
+
+If negative labels are present, the handoff file is not forecasting-ready and
+should be regenerated from the clustering notebook using the reassignment step.
 """
 
 from pathlib import Path
@@ -19,20 +24,31 @@ def load_cluster_assignments(
     diagnostics_dir: Path,
     method: str,
     k: int,
-) -> tuple:
-    """Load cluster assignments for a given method and k.
+) -> tuple[pd.Series, pd.Index]:
+    """Load forecasting-ready cluster assignments for a given method and k.
 
     Parameters
     ----------
-    diagnostics_dir : Path to results/diagnostics/.
-    method          : "feature_ward" or "kshape".
-    k               : Number of regular clusters.
+    diagnostics_dir : Path
+        Path to results/diagnostics/.
+    method : str
+        "feature_ward" or "kshape".
+    k : int
+        Number of regular clusters.
 
     Returns
     -------
-    cluster_series  : Series mapping household_id -> cluster label (int).
-    degenerate_ids  : Index of households with labels < 0.
-    regular_ids     : Index of households with labels >= 0.
+    cluster_series : pd.Series
+        Series mapping household_id -> nonnegative cluster label (int).
+    regular_ids : pd.Index
+        Index of households with valid regular cluster assignments.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the requested handoff file does not exist.
+    ValueError
+        If the file contains negative labels or missing labels.
     """
     diagnostics_dir = Path(diagnostics_dir)
     path = diagnostics_dir / f"{method}_k{k}_forecasting_handoff.csv"
@@ -45,18 +61,32 @@ def load_cluster_assignments(
 
     df = pd.read_csv(path, index_col=0)
 
-    # Find the cluster column
     col = "cluster" if "cluster" in df.columns else df.columns[0]
     if col != "cluster":
         print(f"  Warning: 'cluster' column not found in {path.name}; using '{col}'")
 
-    cluster_series      = df[col].astype(int)
+    cluster_series = pd.to_numeric(df[col], errors="coerce")
+
+    if cluster_series.isna().any():
+        bad_ids = cluster_series.index[cluster_series.isna()].tolist()[:10]
+        raise ValueError(
+            f"Forecasting handoff contains missing/non-numeric cluster labels. "
+            f"Example household IDs: {bad_ids}"
+        )
+
+    if (cluster_series < 0).any():
+        bad_ids = cluster_series.index[cluster_series < 0].tolist()[:10]
+        raise ValueError(
+            "Forecasting handoff contains negative cluster labels, but forecasting "
+            "expects reassigned nonnegative labels only. "
+            f"Example household IDs: {bad_ids}"
+        )
+
+    cluster_series = cluster_series.astype(int)
     cluster_series.name = "cluster"
 
-    regular_ids    = cluster_series[cluster_series >= 0].index
-    degenerate_ids = cluster_series[cluster_series <  0].index
+    regular_ids = cluster_series.index
 
-    print(f"  [{method} k={k}] {len(regular_ids):,} regular, "
-          f"{len(degenerate_ids):,} degenerate households")
+    print(f"  [{method} k={k}] {len(regular_ids):,} forecasting-ready households loaded")
 
-    return cluster_series, degenerate_ids, regular_ids
+    return cluster_series, regular_ids
